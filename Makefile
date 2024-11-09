@@ -1,4 +1,3 @@
-
 # Makefile for CUDA project
 
 # Specify the compiler for CUDA
@@ -6,6 +5,9 @@ NVCC = nvcc
 
 # Flags for CUDA, assuming a common architecture, but this can be adjusted for specific hardware
 NVCC_FLAGS = -arch=sm_50 -O2 --compiler-options "-Wall"
+
+# Flags for OpenCV (using pkg-config to get the required flags)
+OPENCV_FLAGS = `pkg-config --cflags --libs opencv4`
 
 # Define the target executable
 TARGET = hough
@@ -17,12 +19,12 @@ OBJS = pgm.o
 all: $(TARGET)
 
 # Rule for building the main CUDA file
-$(TARGET): hough.cu $(OBJS)
-	$(NVCC) $(NVCC_FLAGS) hough.cu $(OBJS) -o $(TARGET)
+$(TARGET): houghBase.cu $(OBJS)
+	$(NVCC) $(NVCC_FLAGS) houghBase.cu $(OBJS) -o $(TARGET) $(OPENCV_FLAGS)
 
 # Rule for pgm.o compilation
-pgm.o: common/pgm.cpp
-	g++ -c common/pgm.cpp -o pgm.o
+pgm.o: pgm.cpp
+	g++ -c pgm.cpp -o pgm.o $(OPENCV_FLAGS)
 
 # Clean rule to remove object files and executable
 clean:
