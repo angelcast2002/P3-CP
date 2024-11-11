@@ -16,3 +16,4 @@ class PGMImage
 };
 
 #endif
+

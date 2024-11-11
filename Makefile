@@ -1,16 +1,22 @@
+OPENCV_CFLAGS := $(shell pkg-config --cflags opencv4)
+OPENCV_LIBS := $(shell pkg-config --libs opencv4)
+
+NVCC_FLAGS := -diag-suppress <warning-number>
+
+
 all: pgm.o hough houghConstant houghShared
 
 hough: houghBase.cu pgm.o
-	nvcc houghBase.cu pgm.o -ljpeg -o hough
+	nvcc $(NVCC_FLAGS) $(OPENCV_CFLAGS) houghBase.cu pgm.o -ljpeg $(OPENCV_LIBS) -o hough
 
 houghConstant: houghConstant.cu pgm.o
-	nvcc houghConstant.cu pgm.o -ljpeg -o houghConstant
+	nvcc $(NVCC_FLAGS) $(OPENCV_CFLAGS) houghConstant.cu pgm.o -ljpeg $(OPENCV_LIBS) -o houghConstant
 
 houghShared: houghShared.cu pgm.o
-	nvcc houghShared.cu pgm.o -ljpeg -o houghShared
+	nvcc $(NVCC_FLAGS) $(OPENCV_CFLAGS) houghShared.cu pgm.o -ljpeg $(OPENCV_LIBS) -o houghShared
 
 pgm.o:	pgm.cpp
-	g++ -std=c++17 -c pgm.cpp -o pgm.o
+	g++ -std=c++17 $(OPENCV_CFLAGS) -c pgm.cpp -o pgm.o
 
 run1:
 	./hough runway.pgm

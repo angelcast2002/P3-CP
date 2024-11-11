@@ -15,6 +15,8 @@
 #include <string.h>
 #include <vector>
 #include "pgm.h"
+#include <opencv2/opencv.hpp>
+
 
 const int degreeInc = 2;
 const int degreeBins = 180 / degreeInc;
@@ -303,6 +305,11 @@ int main(int argc, char **argv)
     // Guardar la imagen resultante en formato PPM
     savePPM("results/outputBase.ppm", resultImage, w, h);
     printf("Imagen con líneas guardada en 'output.ppm'\n");
+
+    // Guardar la imagen resultante en formato PNG usando OpenCV
+    cv::Mat imgMat(h, w, CV_8UC3, resultImage);
+    cv::imwrite("results/outputBase.png", imgMat);
+    printf("Imagen con líneas guardada en 'outputBase.png'\n");
 
     // Liberar memoria en el host
     free(h_hough);

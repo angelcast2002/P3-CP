@@ -5,6 +5,7 @@
 #include <string.h>
 #include <vector>
 #include "pgm.h"
+#include <opencv2/opencv.hpp>
 
 const int degreeInc = 2;
 const int degreeBins = 180 / degreeInc;
@@ -243,7 +244,7 @@ int main(int argc, char **argv)
         if (cpuht[i] != h_hough[i])
         {
             discrepancies++;
-            printf("Diferencia en índice %i: CPU=%i GPU=%i\n", i, cpuht[i], h_hough[i]);
+            printf("Calculation mismatch at : %i CPU=%i GPU=%i\n", i, cpuht[i], h_hough[i]);
         }
     }
     if (discrepancies == 0)
@@ -307,6 +308,11 @@ int main(int argc, char **argv)
     // Guardar la imagen resultante en formato PPM
     savePPM("results/outputShared.ppm", resultImage, w, h);
     printf("Imagen con líneas guardada en 'outputShared.ppm'\n");
+
+    // Guardar la imagen resultante en formato PNG usando OpenCV
+    cv::Mat imgMat(h, w, CV_8UC3, resultImage);
+    cv::imwrite("results/outputShared.png", imgMat);
+    printf("Imagen con líneas guardada en 'outputShared.png'\n");
 
     // Liberar memoria en el host
     free(h_hough);
