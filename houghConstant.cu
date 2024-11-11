@@ -1,13 +1,3 @@
-/*
- ============================================================================
- Author        : G. Barlas
- Version       : 1.0
- Last modified : December 2014
- License       : Released under the GNU GPL 3.0
- Description   :
- To build use  : make
- ============================================================================
-*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -26,6 +16,10 @@ struct Line {
     double r;
     double theta;
 };
+
+// Declaración de memoria constante
+__constant__ double d_Cos[degreeBins];
+__constant__ double d_Sin[degreeBins];
 
 //*****************************************************************
 // The CPU function returns a pointer to the accumulator
@@ -74,7 +68,7 @@ void CPU_HoughTran(unsigned char *pic, int w, int h, int **acc)
 
 // GPU kernel. One thread per image pixel is spawned.
 // The accumulator memory needs to be allocated by the host in global memory
-__global__ void GPU_HoughTran(unsigned char *pic, int w, int h, int *acc, double rMax, double rScale, const double *d_Cos, const double *d_Sin)
+__global__ void GPU_HoughTran(unsigned char *pic, int w, int h, int *acc, double rMax, double rScale)
 {
     int gloID = blockIdx.x * blockDim.x + threadIdx.x;
     if (gloID >= w * h) return;
@@ -197,12 +191,9 @@ int main(int argc, char **argv)
     double rMax = sqrt(1.0 * w * w + 1.0 * h * h) / 2.0;
     double rScale = (2.0 * rMax) / rBins;
 
-    // Allocate and copy cosine and sine tables to device memory
-    double *d_Cos, *d_Sin;
-    cudaMalloc((void **)&d_Cos, sizeof(double) * degreeBins);
-    cudaMalloc((void **)&d_Sin, sizeof(double) * degreeBins);
-    cudaMemcpy(d_Cos, pcCos, sizeof(double) * degreeBins, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_Sin, pcSin, sizeof(double) * degreeBins, cudaMemcpyHostToDevice);
+    // Copiar valores precalculados a memoria constante
+    cudaMemcpyToSymbol(d_Cos, pcCos, sizeof(double) * degreeBins);
+    cudaMemcpyToSymbol(d_Sin, pcSin, sizeof(double) * degreeBins);
 
     // Setup and copy data from host to device
     unsigned char *d_in, *h_in;
@@ -220,7 +211,7 @@ int main(int argc, char **argv)
     // Execution configuration uses a 1-D grid of 1-D blocks, each made of 256 threads
     int threadsPerBlock = 256;
     int blockNum = (w * h + threadsPerBlock - 1) / threadsPerBlock;
-    GPU_HoughTran<<<blockNum, threadsPerBlock>>>(d_in, w, h, d_hough, rMax, rScale, d_Cos, d_Sin);
+    GPU_HoughTran<<<blockNum, threadsPerBlock>>>(d_in, w, h, d_hough, rMax, rScale);
 
     // Get results from device
     cudaMemcpy(h_hough, d_hough, sizeof(int) * degreeBins * rBins, cudaMemcpyDeviceToHost);
@@ -228,8 +219,6 @@ int main(int argc, char **argv)
     // Liberar memoria en el dispositivo
     cudaFree(d_in);
     cudaFree(d_hough);
-    cudaFree(d_Cos);
-    cudaFree(d_Sin);
 
     // Comparar resultados CPU y GPU
     int discrepancies = 0;
@@ -301,8 +290,8 @@ int main(int argc, char **argv)
     }
 
     // Guardar la imagen resultante en formato PPM
-    savePPM("results/outputBase.ppm", resultImage, w, h);
-    printf("Imagen con líneas guardada en 'output.ppm'\n");
+    savePPM("results/outputConstants.ppm", resultImage, w, h);
+    printf("Imagen con líneas guardada en 'outputConstants.ppm'\n");
 
     // Liberar memoria en el host
     free(h_hough);

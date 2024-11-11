@@ -1,13 +1,3 @@
-/*
- ============================================================================
- Author        : G. Barlas
- Version       : 1.0
- Last modified : December 2014
- License       : Released under the GNU GPL 3.0
- Description   :
- To build use  : make
- ============================================================================
-*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -27,8 +17,12 @@ struct Line {
     double theta;
 };
 
+// Declaración de memoria constante
+__constant__ double d_Cos[degreeBins];
+__constant__ double d_Sin[degreeBins];
+
 //*****************************************************************
-// The CPU function returns a pointer to the accumulator
+// La función CPU_HoughTran es la misma que antes
 void CPU_HoughTran(unsigned char *pic, int w, int h, int **acc)
 {
     double rMax = sqrt(1.0 * w * w + 1.0 * h * h) / 2.0;
@@ -72,11 +66,12 @@ void CPU_HoughTran(unsigned char *pic, int w, int h, int **acc)
     delete[] thetaValues;
 }
 
-// GPU kernel. One thread per image pixel is spawned.
-// The accumulator memory needs to be allocated by the host in global memory
-__global__ void GPU_HoughTran(unsigned char *pic, int w, int h, int *acc, double rMax, double rScale, const double *d_Cos, const double *d_Sin)
+// GPU kernel. Un hilo por píxel de imagen.
+__global__ void GPU_HoughTran(unsigned char *pic, int w, int h, int *acc, double rMax, double rScale)
 {
     int gloID = blockIdx.x * blockDim.x + threadIdx.x;
+    int locID = threadIdx.x;
+
     if (gloID >= w * h) return;
 
     int xCent = w / 2;
@@ -84,6 +79,15 @@ __global__ void GPU_HoughTran(unsigned char *pic, int w, int h, int *acc, double
 
     int xCoord = gloID % w - xCent;
     int yCoord = yCent - gloID / w;
+
+    // Definir acumulador local en memoria compartida
+    extern __shared__ int localAcc[];
+
+    // Inicializar acumulador local a 0
+    for (int idx = locID; idx < degreeBins * rBins; idx += blockDim.x) {
+        localAcc[idx] = 0;
+    }
+    __syncthreads(); // Barrera para asegurar que todos los hilos hayan completado la inicialización
 
     if (pic[gloID] > 0)
     {
@@ -93,13 +97,21 @@ __global__ void GPU_HoughTran(unsigned char *pic, int w, int h, int *acc, double
             int rIdx = (int)((r + rMax) / rScale + 0.5);
             if (rIdx >= 0 && rIdx < rBins)
             {
-                atomicAdd(acc + (rIdx * degreeBins + tIdx), 1);
+                atomicAdd(&localAcc[rIdx * degreeBins + tIdx], 1);
             }
+        }
+    }
+    __syncthreads(); // Barrera para asegurar que todos los hilos hayan completado el incremento del acumulador local
+
+    // Sumar valores del acumulador local al acumulador global
+    for (int idx = locID; idx < degreeBins * rBins; idx += blockDim.x) {
+        if (localAcc[idx] > 0) { // Solo si hay algo que sumar
+            atomicAdd(&acc[idx], localAcc[idx]);
         }
     }
 }
 
-// Función para dibujar una línea sobre la imagen en color
+// Las funciones drawLine y savePPM son las mismas que antes
 void drawLine(unsigned char *image, int w, int h, double r, double theta)
 {
     int xCent = w / 2;
@@ -107,8 +119,6 @@ void drawLine(unsigned char *image, int w, int h, double r, double theta)
 
     double cosT = cos(theta);
     double sinT = sin(theta);
-
-    int pixelsDrawn = 0; // Contador de píxeles dibujados
 
     if (fabs(sinT) > 0.5)
     {
@@ -124,7 +134,6 @@ void drawLine(unsigned char *image, int w, int h, double r, double theta)
                 image[3 * idx] = 255;     // R
                 image[3 * idx + 1] = 0;   // G
                 image[3 * idx + 2] = 0;   // B
-                pixelsDrawn++;
             }
         }
     }
@@ -142,13 +151,11 @@ void drawLine(unsigned char *image, int w, int h, double r, double theta)
                 image[3 * idx] = 255;     // R
                 image[3 * idx + 1] = 0;   // G
                 image[3 * idx + 2] = 0;   // B
-                pixelsDrawn++;
             }
         }
     }
 }
 
-// Función para guardar la imagen en formato PPM (color)
 void savePPM(const char *filename, unsigned char *image, int w, int h)
 {
     FILE *fp = fopen(filename, "wb");
@@ -178,10 +185,10 @@ int main(int argc, char **argv)
     int w = inImg.x_dim;
     int h = inImg.y_dim;
 
-    // CPU calculation
+    // Cálculo en CPU
     CPU_HoughTran(inImg.pixels, w, h, &cpuht);
 
-    // Precompute values to be stored
+    // Precalcular valores de theta, coseno y seno
     double *thetaValues = (double *)malloc(sizeof(double) * degreeBins);
     double *pcCos = (double *)malloc(sizeof(double) * degreeBins);
     double *pcSin = (double *)malloc(sizeof(double) * degreeBins);
@@ -197,39 +204,37 @@ int main(int argc, char **argv)
     double rMax = sqrt(1.0 * w * w + 1.0 * h * h) / 2.0;
     double rScale = (2.0 * rMax) / rBins;
 
-    // Allocate and copy cosine and sine tables to device memory
-    double *d_Cos, *d_Sin;
-    cudaMalloc((void **)&d_Cos, sizeof(double) * degreeBins);
-    cudaMalloc((void **)&d_Sin, sizeof(double) * degreeBins);
-    cudaMemcpy(d_Cos, pcCos, sizeof(double) * degreeBins, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_Sin, pcSin, sizeof(double) * degreeBins, cudaMemcpyHostToDevice);
+    // Copiar valores precalculados a memoria constante
+    cudaMemcpyToSymbol(d_Cos, pcCos, sizeof(double) * degreeBins);
+    cudaMemcpyToSymbol(d_Sin, pcSin, sizeof(double) * degreeBins);
 
-    // Setup and copy data from host to device
-    unsigned char *d_in, *h_in;
+    // Configurar y copiar datos del host al dispositivo
+    unsigned char *d_in;
     int *d_hough, *h_hough;
-
-    h_in = inImg.pixels;
 
     h_hough = (int *)malloc(degreeBins * rBins * sizeof(int));
 
     cudaMalloc((void **)&d_in, sizeof(unsigned char) * w * h);
     cudaMalloc((void **)&d_hough, sizeof(int) * degreeBins * rBins);
-    cudaMemcpy(d_in, h_in, sizeof(unsigned char) * w * h, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_in, inImg.pixels, sizeof(unsigned char) * w * h, cudaMemcpyHostToDevice);
     cudaMemset(d_hough, 0, sizeof(int) * degreeBins * rBins);
 
-    // Execution configuration uses a 1-D grid of 1-D blocks, each made of 256 threads
+    // Configuración de la ejecución: 1-D grid de 1-D blocks, cada uno con 256 threads
     int threadsPerBlock = 256;
     int blockNum = (w * h + threadsPerBlock - 1) / threadsPerBlock;
-    GPU_HoughTran<<<blockNum, threadsPerBlock>>>(d_in, w, h, d_hough, rMax, rScale, d_Cos, d_Sin);
 
-    // Get results from device
+    // Calcular el tamaño de memoria compartida necesaria
+    size_t sharedMemSize = sizeof(int) * degreeBins * rBins;
+
+    // Ejecutar el kernel
+    GPU_HoughTran<<<blockNum, threadsPerBlock, sharedMemSize>>>(d_in, w, h, d_hough, rMax, rScale);
+
+    // Obtener resultados del dispositivo
     cudaMemcpy(h_hough, d_hough, sizeof(int) * degreeBins * rBins, cudaMemcpyDeviceToHost);
 
     // Liberar memoria en el dispositivo
     cudaFree(d_in);
     cudaFree(d_hough);
-    cudaFree(d_Cos);
-    cudaFree(d_Sin);
 
     // Comparar resultados CPU y GPU
     int discrepancies = 0;
@@ -238,7 +243,7 @@ int main(int argc, char **argv)
         if (cpuht[i] != h_hough[i])
         {
             discrepancies++;
-            printf("Calculation mismatch at : %i CPU=%i GPU=%i\n", i, cpuht[i], h_hough[i]);
+            printf("Diferencia en índice %i: CPU=%i GPU=%i\n", i, cpuht[i], h_hough[i]);
         }
     }
     if (discrepancies == 0)
@@ -260,7 +265,6 @@ int main(int argc, char **argv)
     double variance = (sumSq / total) - (mean * mean);
     double stddev = sqrt(variance);
     double threshold = (mean + 2 * stddev) * 1.20;
-    //double threshold = 4200;
 
     printf("Umbral establecido en: %f\n", threshold);
 
@@ -301,8 +305,8 @@ int main(int argc, char **argv)
     }
 
     // Guardar la imagen resultante en formato PPM
-    savePPM("results/outputBase.ppm", resultImage, w, h);
-    printf("Imagen con líneas guardada en 'output.ppm'\n");
+    savePPM("results/outputShared.ppm", resultImage, w, h);
+    printf("Imagen con líneas guardada en 'outputShared.ppm'\n");
 
     // Liberar memoria en el host
     free(h_hough);
