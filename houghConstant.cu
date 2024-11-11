@@ -212,8 +212,18 @@ int main(int argc, char **argv)
     // Execution configuration uses a 1-D grid of 1-D blocks, each made of 256 threads
     int threadsPerBlock = 256;
     int blockNum = (w * h + threadsPerBlock - 1) / threadsPerBlock;
+    cudaEvent_t start, stop;
+    cudaEventCreate (&start);
+    cudaEventCreate (&stop);
+    cudaEventRecord (start);
     GPU_HoughTran<<<blockNum, threadsPerBlock>>>(d_in, w, h, d_hough, rMax, rScale);
 
+    cudaEventRecord (stop);
+    cudaEventSynchronize (stop);
+    float elapsedTime;
+    cudaEventElapsedTime (&elapsedTime, start, stop);
+    printf ("GPU time: %f ms\n", elapsedTime);
+    
     // Get results from device
     cudaMemcpy(h_hough, d_hough, sizeof(int) * degreeBins * rBins, cudaMemcpyDeviceToHost);
 

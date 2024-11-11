@@ -228,8 +228,18 @@ int main(int argc, char **argv)
     size_t sharedMemSize = sizeof(int) * degreeBins * rBins;
 
     // Ejecutar el kernel
+    cudaEvent_t start, stop;
+    cudaEventCreate (&start);
+    cudaEventCreate (&stop);
+    cudaEventRecord (start);
     GPU_HoughTran<<<blockNum, threadsPerBlock, sharedMemSize>>>(d_in, w, h, d_hough, rMax, rScale);
-
+    
+    cudaEventRecord (stop);
+    cudaEventSynchronize (stop);
+    float elapsedTime;
+    cudaEventElapsedTime (&elapsedTime, start, stop);
+    printf ("GPU time: %f ms\n", elapsedTime);
+    
     // Obtener resultados del dispositivo
     cudaMemcpy(h_hough, d_hough, sizeof(int) * degreeBins * rBins, cudaMemcpyDeviceToHost);
 
